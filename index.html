@@ -1,467 +1,1106 @@
-<!DOCTYPE html>
-<html lang="th">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AGRI SHOP - POS System</title>
+/* ==========================================
+   AGRI SHOP POS - Main JavaScript
+   Version: 2.1
+   ========================================== */
+
+// ===== CONSTANTS & STATE =====
+const CORRECT_PASSWORD = '1111';
+let isLoggedIn = false;
+
+const state = {
+  staff: [],
+  customers: [],
+  settings: {},
+  cart: [],
+  lastReceipt: null,
+  productsCache: new Map(),
+  stockItems: [],
+  searchResults: [],
+  lastPaymentData: null
+};
+
+// ===== UTILITY FUNCTIONS =====
+const el = (id) => document.getElementById(id);
+const fmt = (n) => Number(n || 0).toFixed(2);
+const esc = (str) => String(str || '')
+  .replaceAll('&', '&amp;')
+  .replaceAll('<', '&lt;')
+  .replaceAll('>', '&gt;')
+  .replaceAll('"', '&quot;')
+  .replaceAll("'", '&#039;');
+
+function toast(msg) {
+  alert(msg);
+}
+
+function setLoading(on, btnIds = []) {
+  el('loading').style.display = on ? 'flex' : 'none';
+  btnIds.forEach(id => {
+    if (el(id)) el(id).disabled = on;
+  });
+}
+
+// ===== LOGIN SYSTEM =====
+function checkLogin() {
+  const password = el('loginPassword').value.trim();
   
-  <!-- External CSS -->
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  if (password === CORRECT_PASSWORD) {
+    isLoggedIn = true;
+    el('loginScreen').style.display = 'none';
+    el('mainApp').style.display = 'flex';
+    el('loginError').style.display = 'none';
+    init();
+  } else {
+    el('loginError').style.display = 'block';
+    el('loginPassword').value = '';
+    el('loginPassword').focus();
+    
+    const loginBox = el('loginScreen').querySelector('div > div');
+    loginBox.style.animation = 'shake 0.3s';
+    setTimeout(() => loginBox.style.animation = '', 300);
+  }
+}
+
+function setupLogin() {
+  const input = el('loginPassword');
+  const btn = el('loginBtn');
   
-  <!-- Custom CSS -->
-  <link rel="stylesheet" href="style.css">
-</head>
-<body>
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      checkLogin();
+    }
+  });
+  
+  btn.addEventListener('click', checkLogin);
+  setTimeout(() => input.focus(), 200);
+  
+  // Hover effects
+  btn.addEventListener('mouseenter', () => {
+    btn.style.background = '#1e4d99';
+    btn.style.transform = 'translateY(-2px)';
+    btn.style.boxShadow = '0 6px 20px rgba(37,99,235,.4)';
+  });
+  
+  btn.addEventListener('mouseleave', () => {
+    btn.style.background = '#2563eb';
+    btn.style.transform = 'translateY(0)';
+    btn.style.boxShadow = '0 4px 12px rgba(37,99,235,.3)';
+  });
+  
+  input.addEventListener('focus', () => {
+    input.style.borderColor = '#3b82f6';
+    input.style.boxShadow = '0 0 0 4px rgba(59,130,246,.15)';
+  });
+  
+  input.addEventListener('blur', () => {
+    input.style.borderColor = '#e2e8f0';
+    input.style.boxShadow = 'none';
+  });
+}
 
-<!-- Login Screen -->
-<div id="loginScreen" style="position:fixed;inset:0;z-index:9999;background:linear-gradient(135deg,#0a1628,#1e4d99);display:flex;align-items:center;justify-content:center">
-  <div style="background:#fff;padding:48px 40px;border-radius:24px;box-shadow:0 20px 60px rgba(0,0,0,.3);max-width:400px;width:90%;text-align:center">
-    <div style="width:80px;height:80px;margin:0 auto 24px;background:linear-gradient(135deg,#3b82f6,#60a5fa);border-radius:20px;display:flex;align-items:center;justify-content:center;font-size:40px;box-shadow:0 8px 24px rgba(59,130,246,.3)">🌾</div>
-    <h1 style="font-size:24px;font-weight:700;color:#0f172a;margin:0 0 8px">AGRI SHOP POS</h1>
-    <p style="font-size:14px;color:#64748b;margin:0 0 32px">ระบบขายหน้าร้าน</p>
-    <div style="margin-bottom:24px">
-      <label style="display:block;text-align:left;font-size:13px;font-weight:600;color:#334155;margin-bottom:8px;text-transform:uppercase">รหัสผ่าน</label>
-      <input id="loginPassword" type="password" placeholder="กรอกรหัสผ่าน" autocomplete="off" style="width:100%;padding:14px 16px;border:2px solid #e2e8f0;border-radius:12px;font-size:16px;font-family:'IBM Plex Mono',monospace;text-align:center;letter-spacing:8px;background:#fffde7">
-      <div id="loginError" style="display:none;margin-top:12px;padding:12px;background:#fee2e2;color:#dc2626;border-radius:8px;font-size:13px;font-weight:600">⚠️ รหัสผ่านไม่ถูกต้อง</div>
-    </div>
-    <button id="loginBtn" style="width:100%;padding:16px;background:#2563eb;color:#fff;border:none;border-radius:12px;font-size:16px;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(37,99,235,.3)">เข้าสู่ระบบ</button>
-    <p style="margin-top:24px;font-size:12px;color:#94a3b8">💡 กรุณาติดต่อผู้ดูแลระบบหากลืมรหัสผ่าน</p>
-  </div>
-</div>
+// ===== TAB NAVIGATION =====
+const tabLabels = {
+  pos: 'ขายหน้าร้าน',
+  products: 'จัดการสินค้า',
+  stock: 'รับเข้า / ปรับสต็อก',
+  reports: 'รายงาน'
+};
 
-<!-- Main App -->
-<div class="layout" id="mainApp" style="display:none">
-  <!-- Sidebar -->
-  <aside class="sidebar">
-    <div class="brand">
-      <div class="brand-logo">
-        <div class="brand-icon">🌾</div>
-        <div>
-          <div class="brand-name" id="storeName">AGRI SHOP</div>
-          <div class="brand-sub">POS SYSTEM</div>
+function switchTab(tab) {
+  document.querySelectorAll('.tab-page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item-sb').forEach(n => n.classList.remove('active'));
+  
+  el('tab-' + tab).classList.add('active');
+  document.querySelector(`[data-tab="${tab}"]`).classList.add('active');
+  el('topbarTitle').textContent = tabLabels[tab];
+  
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// ===== INITIALIZATION =====
+function init() {
+  google.script.run
+    .withSuccessHandler(res => {
+      if (!res.ok) return toast('โหลดข้อมูลไม่สำเร็จ');
+      
+      state.staff = res.staff || [];
+      state.customers = res.customers || [];
+      state.settings = res.settings || {};
+      
+      renderSettings();
+      renderStaff();
+      renderCustomers();
+      renderLowStock(res.lowStock || []);
+      bindEvents();
+      
+      el('topbarDate').textContent = new Date().toLocaleDateString('th-TH', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      });
+      
+      el('repDate').valueAsDate = new Date();
+    })
+    .withFailureHandler(err => toast(err.message || err))
+    .api_getInit();
+}
+
+function renderSettings() {
+  el('storeName').textContent = state.settings.store_name || 'AGRI SHOP';
+}
+
+function renderStaff() {
+  const opts = ['<option value="">— เลือก —</option>'].concat(
+    state.staff.map(s => `<option>${esc(s)}</option>`)
+  );
+  
+  el('posCashier').innerHTML = opts.join('');
+  el('stockBy').innerHTML = opts.join('');
+  
+  el('posCashier').addEventListener('change', () => {
+    el('cashierBadge').textContent = el('posCashier').value || '— ยังไม่เลือก —';
+  });
+}
+
+function renderCustomers() {
+  const dl = el('customerList');
+  if (dl) {
+    dl.innerHTML = state.customers.map(c => `<option value="${esc(c)}">`).join('');
+  }
+}
+
+// ===== EVENT BINDINGS =====
+function bindEvents() {
+  // POS Tab
+  el('barcodeInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const code = el('barcodeInput').value.trim();
+      el('barcodeInput').value = '';
+      if (code) addByBarcodeToCart(code);
+    }
+  });
+  
+  el('productSearch').addEventListener('input', onProductSearchInput);
+  el('productSearch').addEventListener('keydown', onProductSearchKeydown);
+  el('productSearch').addEventListener('focus', () => {
+    if (el('productSearch').value.trim().length >= 1) {
+      renderSearchDropdown(state.searchResults);
+    }
+  });
+  
+  document.addEventListener('click', (e) => {
+    if (!el('productSearch').contains(e.target) && 
+        !el('searchDropdown').contains(e.target)) {
+      closeSearchDropdown();
+    }
+  });
+  
+  el('btnClearCart').addEventListener('click', () => {
+    state.cart = [];
+    renderCart();
+    calcTotals();
+  });
+  
+  el('btnSaveSale').addEventListener('click', saveSale);
+  el('btnPrintLast').addEventListener('click', printPDFReceipt);
+  
+  // Products Tab
+  el('btnProdSearch').addEventListener('click', loadProducts);
+  el('prodSearch').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') loadProducts();
+  });
+  el('btnSaveProduct').addEventListener('click', saveProduct);
+  
+  // Stock Tab
+  el('stockBarcode').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const code = el('stockBarcode').value.trim();
+      el('stockBarcode').value = '';
+      if (code) addByBarcodeToStockTable(code);
+    }
+  });
+  
+  el('btnStockClear').addEventListener('click', () => {
+    state.stockItems = [];
+    renderStockTable();
+  });
+  
+  el('btnStockIn').addEventListener('click', doStockIn);
+  el('btnStockAdjust').addEventListener('click', doStockAdjust);
+  
+  // Reports Tab
+  el('btnRunDaily').addEventListener('click', runDailyReport);
+  
+  // Navigation
+  document.querySelectorAll('.nav-item-sb').forEach(btn => {
+    btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+  });
+}
+
+// ===== PRODUCT SEARCH =====
+let searchTimer = null;
+let searchHighlight = -1;
+
+function onProductSearchInput() {
+  const query = el('productSearch').value.trim();
+  clearTimeout(searchTimer);
+  searchHighlight = -1;
+  
+  if (query.length < 1) {
+    closeSearchDropdown();
+    return;
+  }
+  
+  searchTimer = setTimeout(() => {
+    const cached = [];
+    state.productsCache.forEach(p => {
+      if (p.Name.toLowerCase().includes(query.toLowerCase()) ||
+          p.Barcode.includes(query) ||
+          (p.Category || '').toLowerCase().includes(query.toLowerCase())) {
+        cached.push(p);
+      }
+    });
+    
+    if (cached.length > 0) {
+      state.searchResults = cached.slice(0, 10);
+      renderSearchDropdown(state.searchResults);
+    }
+    
+    google.script.run
+      .withSuccessHandler(res => {
+        if (!res.ok) return;
+        res.products.forEach(p => state.productsCache.set(p.Barcode, p));
+        state.searchResults = res.products.slice(0, 10);
+        renderSearchDropdown(state.searchResults);
+      })
+      .withFailureHandler(() => {})
+      .api_listProducts(query);
+  }, 250);
+}
+
+function renderSearchDropdown(products) {
+  const dd = el('searchDropdown');
+  
+  if (!products || !products.length) {
+    dd.innerHTML = '<div style="padding:12px 16px;color:#94a3b8;font-size:13px">ไม่พบสินค้า</div>';
+    dd.style.display = 'block';
+    return;
+  }
+  
+  dd.innerHTML = products.map((p, i) => {
+    const stockColor = p.Stock <= 0 ? '#dc2626' : p.Stock <= 5 ? '#d97706' : '#059669';
+    return `
+      <div class="search-item ${i === searchHighlight ? 'highlighted' : ''}" data-idx="${i}" onclick="selectSearchProduct(${i})">
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:600;font-size:13.5px;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(p.Name)}</div>
+          <div style="font-size:11px;color:#94a3b8;font-family:'IBM Plex Mono',monospace;margin-top:2px">${esc(p.Barcode)} · ${esc(p.Category || '')}</div>
+        </div>
+        <div style="text-align:right;flex-shrink:0">
+          <div style="font-family:'IBM Plex Mono',monospace;font-weight:700;font-size:14px;color:#1e4d99">${fmt(p.Price)} ฿</div>
+          <div style="font-size:11px;font-weight:600;color:${stockColor}">เหลือ ${p.Stock}</div>
         </div>
       </div>
-    </div>
-    <div class="cashier-display">CASHIER<br><span id="cashierBadge">— ยังไม่เลือก —</span></div>
-    <nav class="sidebar-nav">
-      <button class="nav-item-sb active" data-tab="pos"><span class="nav-icon">🛒</span>ขายหน้าร้าน</button>
-      <button class="nav-item-sb" data-tab="products"><span class="nav-icon">📦</span>สินค้า</button>
-      <button class="nav-item-sb" data-tab="stock"><span class="nav-icon">🗂️</span>รับเข้า/สต็อก</button>
-      <button class="nav-item-sb" data-tab="reports"><span class="nav-icon">📊</span>รายงาน</button>
-    </nav>
-    <div class="sidebar-footer"><span class="status-dot"></span> ออนไลน์ • v2.1</div>
-  </aside>
+    `;
+  }).join('');
+  
+  dd.style.display = 'block';
+}
 
-  <!-- Main Content -->
-  <div class="main-content">
-    <div class="topbar">
-      <div class="topbar-title" id="topbarTitle">ขายหน้าร้าน</div>
-      <div class="topbar-right"><span class="text-muted-sm" id="topbarDate"></span></div>
-    </div>
+function onProductSearchKeydown(e) {
+  const items = state.searchResults;
+  if (!items || !items.length) return;
+  
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    searchHighlight = Math.min(searchHighlight + 1, items.length - 1);
+    renderSearchDropdown(items);
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    searchHighlight = Math.max(searchHighlight - 1, -1);
+    renderSearchDropdown(items);
+  } else if (e.key === 'Enter' && searchHighlight >= 0) {
+    e.preventDefault();
+    selectSearchProduct(searchHighlight);
+  } else if (e.key === 'Escape') {
+    closeSearchDropdown();
+  }
+}
 
-    <div class="page-body">
-      <!-- POS TAB -->
-      <div class="tab-page active" id="tab-pos">
-        <!-- Customer Info -->
-        <div class="card-panel mb-0" style="margin-bottom:14px">
-          <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:14px;margin-bottom:14px">
-            <div>
-              <label class="form-label">ผู้ขาย (Cashier)</label>
-              <select id="posCashier" class="form-control form-select">
-                <option value="">— เลือก —</option>
-              </select>
-            </div>
-            <div>
-              <label class="form-label">ชื่อลูกค้า</label>
-              <input id="posCustomer" list="customerList" class="form-control" placeholder="ชื่อลูกค้า">
-              <datalist id="customerList"></datalist>
-            </div>
-            <div>
-              <label class="form-label">เบอร์โทร</label>
-              <input id="posPhone" class="form-control" placeholder="เบอร์โทรศัพท์" type="tel">
-            </div>
-            <div>
-              <label class="form-label">วิธีชำระเงิน</label>
-              <select id="posPay" class="form-control form-select">
-                <option>เงินสด</option>
-                <option>โอน</option>
-                <option>บัตร</option>
-                <option>อื่น ๆ</option>
-              </select>
-            </div>
-          </div>
-          <div style="display:grid;grid-template-columns:3fr 1fr;gap:14px;align-items:end">
-            <div>
-              <label class="form-label">ที่อยู่ลูกค้า</label>
-              <input id="posAddress" class="form-control" placeholder="บ้านเลขที่ / หมู่บ้าน / ถนน / ตำบล / อำเภอ / จังหวัด">
-            </div>
-            <div>
-              <button id="btnClearCart" class="btn btn-outline-danger w-full" style="height:38px">🗑 ล้างตะกร้า</button>
-            </div>
-          </div>
-        </div>
+window.selectSearchProduct = function(idx) {
+  const p = state.searchResults[idx];
+  if (!p) return;
+  
+  addProductToCart(p);
+  el('productSearch').value = '';
+  closeSearchDropdown();
+  el('productSearch').focus();
+};
 
-        <!-- Scanner -->
-        <div class="scanner-section">
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-            <div>
-              <div class="scanner-label">📡 สแกนบาร์โค้ด</div>
-              <input id="barcodeInput" type="text" placeholder="คลิกช่องนี้แล้วใช้ปืนยิงบาร์โค้ด...">
-              <div class="scanner-tip">💡 ยิงบาร์โค้ดซ้ำ = เพิ่มจำนวนอัตโนมัติ</div>
-            </div>
-            <div style="position:relative">
-              <div class="scanner-label">🔍 ค้นหาชื่อสินค้า</div>
-              <input id="productSearch" type="text" autocomplete="off" placeholder="พิมพ์ชื่อสินค้า...">
-              <div class="scanner-tip">💡 พิมพ์นำ → เลือกจากรายการ</div>
-              <div id="searchDropdown" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:500;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.15);max-height:280px;overflow-y:auto;margin-top:4px"></div>
-            </div>
-          </div>
-        </div>
+function closeSearchDropdown() {
+  el('searchDropdown').style.display = 'none';
+  searchHighlight = -1;
+}
 
-        <!-- Cart & Summary -->
-        <div style="display:grid;grid-template-columns:1fr 300px;gap:18px;align-items:start">
-          <!-- Cart Table -->
-          <div class="card-panel" style="padding:0;overflow:hidden">
-            <div style="padding:16px 20px 12px;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between">
-              <div style="font-size:14px;font-weight:700">ตะกร้าสินค้า</div>
-              <div class="text-muted-sm" id="cartCount">0 รายการ</div>
-            </div>
-            <div class="table-wrap">
-              <table class="data-table">
-                <thead>
-                  <tr>
-                    <th>บาร์โค้ด</th>
-                    <th>สินค้า</th>
-                    <th class="text-end">ราคา/ชิ้น</th>
-                    <th style="text-align:center">จำนวน</th>
-                    <th class="text-end">ส่วนลด</th>
-                    <th class="text-end">รวม</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody id="cartBody">
-                  <tr>
-                    <td colspan="7">
-                      <div class="empty-state">
-                        <div class="empty-icon">🛒</div>
-                        <div class="empty-text">ยังไม่มีสินค้าในตะกร้า</div>
-                      </div>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
+// ===== CART MANAGEMENT =====
+function addByBarcodeToCart(barcode) {
+  const found = state.cart.find(it => it.Barcode === barcode);
+  if (found) {
+    found.Qty += 1;
+    renderCart();
+    calcTotals();
+    return;
+  }
+  
+  if (state.productsCache.has(barcode)) {
+    const p = state.productsCache.get(barcode);
+    addProductToCart(p);
+    return;
+  }
+  
+  setLoading(true, ['btnSaveSale', 'btnClearCart']);
+  google.script.run
+    .withSuccessHandler(res => {
+      setLoading(false, ['btnSaveSale', 'btnClearCart']);
+      if (!res.ok) return toast(res.message || 'ไม่พบสินค้า');
+      const p = res.product;
+      state.productsCache.set(barcode, p);
+      addProductToCart(p);
+    })
+    .withFailureHandler(err => {
+      setLoading(false, ['btnSaveSale', 'btnClearCart']);
+      toast(err.message || err);
+    })
+    .api_getProductByBarcode(barcode);
+}
 
-          <!-- Summary Panel -->
-          <div>
-            <div class="card-panel" style="margin-bottom:14px">
-              <div style="margin-bottom:10px;display:flex;justify-content:space-between">
-                <span style="font-size:13px;color:#64748b">ยอดรวม</span>
-                <span class="mono" style="font-weight:700;font-size:16px" id="subTotal">0.00</span>
-              </div>
-              <div style="margin-bottom:10px;display:flex;justify-content:space-between">
-                <span style="font-size:13px;color:#64748b">ส่วนลด</span>
-                <span class="mono" style="font-size:13px;color:#dc2626" id="discDisplay">- 0.00</span>
-              </div>
-              <div class="divider" style="margin:10px 0"></div>
-              <div style="display:flex;justify-content:space-between">
-                <span style="font-size:14px;font-weight:700">สุทธิ</span>
-                <span class="mono" style="font-weight:700;font-size:26px;color:#2563eb" id="grandTotal">0.00</span>
-              </div>
-            </div>
-            <div style="display:flex;flex-direction:column;gap:10px">
-              <button id="btnSaveSale" class="btn btn-success" style="height:48px;font-size:15px;width:100%">✅ บันทึกการขาย</button>
-              <button id="btnPrintLast" class="btn btn-primary" style="height:44px;width:100%" disabled>🖨️ พิมพ์บิลล่าสุด</button>
-            </div>
-          </div>
-        </div>
+function addProductToCart(p) {
+  state.cart.push({
+    ProductID: p.ProductID,
+    Barcode: p.Barcode,
+    Name: p.Name,
+    Price: p.Price,
+    Qty: 1,
+    Stock: p.Stock,
+    Discount: 0  // เพิ่มส่วนลดแต่ละรายการ
+  });
+  renderCart();
+  calcTotals();
+}
 
-        <!-- Low Stock Alert -->
-        <div class="card-panel" style="margin-top:18px">
-          <div class="card-panel-title">⚠️ สินค้าใกล้หมด</div>
-          <div id="lowStockBody">
-            <div class="empty-state" style="padding:24px">
-              <div class="empty-text">ไม่มีรายการใกล้หมด</div>
-            </div>
+function renderCart() {
+  el('cartCount').textContent = `${state.cart.length} รายการ`;
+  
+  if (!state.cart.length) {
+    el('cartBody').innerHTML = `
+      <tr>
+        <td colspan="7">
+          <div class="empty-state">
+            <div class="empty-icon">🛒</div>
+            <div class="empty-text">ยังไม่มีสินค้าในตะกร้า</div>
           </div>
-        </div>
-      </div>
+        </td>
+      </tr>
+    `;
+    return;
+  }
+  
+  el('cartBody').innerHTML = state.cart.map((it, idx) => {
+    const lineTotal = it.Qty * it.Price - (it.Discount || 0);
+    const stockBadge = it.Stock <= 0
+      ? '<span class="badge-stock badge-low">หมด</span>'
+      : it.Stock <= 5
+        ? `<span class="badge-stock badge-warn">เหลือ ${it.Stock}</span>`
+        : `<span class="badge-stock badge-ok">เหลือ ${it.Stock}</span>`;
+    
+    return `
+      <tr>
+        <td class="mono" style="font-size:12px;color:#94a3b8">${esc(it.Barcode)}</td>
+        <td>
+          <div class="product-name">${esc(it.Name)}</div>
+          <div class="product-sub">${stockBadge}</div>
+        </td>
+        <td class="text-end mono" style="font-weight:600">${fmt(it.Price)}</td>
+        <td style="text-align:center">
+          <div class="qty-group">
+            <button class="qty-btn" onclick="cartDecQty(${idx})">−</button>
+            <input class="qty-input" type="number" value="${it.Qty}" 
+              onchange="cartSetQty(${idx}, this.value)" min="1">
+            <button class="qty-btn" onclick="cartIncQty(${idx})">+</button>
+          </div>
+        </td>
+        <td class="text-end">
+          <input type="number" class="form-control" style="width:90px;height:32px;font-size:12px;text-align:right"
+            value="${it.Discount || 0}" 
+            onchange="cartSetDisc(${idx}, this.value)" 
+            min="0" step="0.01">
+        </td>
+        <td class="text-end mono" style="font-weight:700;font-size:14px;color:#1e4d99">${fmt(lineTotal)}</td>
+        <td style="text-align:center">
+          <button class="btn btn-sm-action" style="color:#dc2626;background:transparent;border:1px solid #dc2626" 
+            onclick="cartRemove(${idx})">🗑</button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
 
-      <!-- PRODUCTS TAB -->
-      <div class="tab-page" id="tab-products">
-        <div class="section-hdr">จัดการสินค้า</div>
-        <div class="section-sub">เพิ่ม / แก้ไข / ค้นหาสินค้าในระบบ</div>
-        
-        <!-- Add/Edit Product Form -->
-        <div class="card-panel">
-          <div class="card-panel-title">เพิ่ม / แก้ไขสินค้า</div>
-          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:14px">
-            <div>
-              <label class="form-label">ProductID <span style="font-weight:400;font-size:10px">(ว่าง = สร้างใหม่)</span></label>
-              <input id="pProductID" class="form-control mono" placeholder="P...">
-            </div>
-            <div>
-              <label class="form-label">Barcode *</label>
-              <input id="pBarcode" class="form-control mono" placeholder="เช่น 885...">
-            </div>
-            <div style="grid-column:span 2">
-              <label class="form-label">ชื่อสินค้า *</label>
-              <input id="pName" class="form-control" placeholder="เช่น ปุ๋ยยูเรีย 46-0-0">
-            </div>
-          </div>
-          <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:14px;margin-bottom:14px">
-            <div style="grid-column:span 2">
-              <label class="form-label">หมวดหมู่</label>
-              <input id="pCategory" class="form-control" placeholder="ปุ๋ย/ยา/เมล็ด">
-            </div>
-            <div>
-              <label class="form-label">หน่วย</label>
-              <input id="pUnit" class="form-control" placeholder="กก./ลิตร">
-            </div>
-            <div>
-              <label class="form-label">ต้นทุน</label>
-              <input id="pCost" class="form-control mono" type="number" placeholder="0">
-            </div>
-            <div>
-              <label class="form-label">ราคาขาย *</label>
-              <input id="pPrice" class="form-control mono" type="number" placeholder="0">
-            </div>
-            <div>
-              <label class="form-label">คงเหลือ</label>
-              <input id="pStock" class="form-control mono" type="number" placeholder="0">
-            </div>
-            <div>
-              <label class="form-label">จุดสั่ง</label>
-              <input id="pReorder" class="form-control mono" type="number" placeholder="0">
-            </div>
-          </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
-            <div>
-              <label class="form-label">สถานะ</label>
-              <select id="pActive" class="form-control form-select">
-                <option value="TRUE">✅ Active (ขายได้)</option>
-                <option value="FALSE">❌ Inactive (ซ่อน)</option>
-              </select>
-            </div>
-            <div>
-              <button id="btnSaveProduct" class="btn btn-success w-full">💾 บันทึกสินค้า</button>
-            </div>
-          </div>
-          <div class="text-muted-sm mt-8">💡 ถ้ากรอก Barcode ที่มีอยู่แล้ว ระบบจะ <strong>แก้ไข</strong> แทนการเพิ่มใหม่</div>
-        </div>
+window.cartIncQty = function(idx) {
+  state.cart[idx].Qty += 1;
+  renderCart();
+  calcTotals();
+};
 
-        <!-- Products List -->
-        <div class="card-panel">
-          <div style="display:flex;gap:10px;margin-bottom:16px">
-            <input id="prodSearch" class="form-control flex-1" placeholder="ค้นหา: บาร์โค้ด / ชื่อ / หมวดหมู่">
-            <button id="btnProdSearch" class="btn btn-outline-primary" style="min-width:120px">🔍 ค้นหา</button>
-          </div>
-          <div class="table-wrap">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>ProductID</th>
-                  <th>Barcode</th>
-                  <th>ชื่อสินค้า</th>
-                  <th>หมวด</th>
-                  <th class="text-end">ราคาขาย</th>
-                  <th class="text-end">คงเหลือ</th>
-                  <th></th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody id="prodBody">
-                <tr>
-                  <td colspan="8">
-                    <div class="empty-state">
-                      <div class="empty-icon">📦</div>
-                      <div class="empty-text">กด "ค้นหา" เพื่อโหลดรายการสินค้า</div>
-                    </div>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
+window.cartDecQty = function(idx) {
+  if (state.cart[idx].Qty > 1) {
+    state.cart[idx].Qty -= 1;
+    renderCart();
+    calcTotals();
+  }
+};
 
-      <!-- STOCK TAB -->
-      <div class="tab-page" id="tab-stock">
-        <div class="section-hdr">รับเข้า / ปรับสต็อก</div>
-        <div class="section-sub">บันทึกการรับสินค้าเข้า หรือปรับยอดคงเหลือ</div>
-        
-        <div class="card-panel" style="margin-bottom:14px">
-          <div style="display:grid;grid-template-columns:200px 1fr;gap:14px;align-items:end">
-            <div>
-              <label class="form-label">ผู้บันทึก</label>
-              <select id="stockBy" class="form-control form-select">
-                <option value="">— เลือก —</option>
-              </select>
-            </div>
-            <div>
-              <label class="form-label">หมายเหตุ</label>
-              <input id="stockNote" class="form-control" placeholder="ระบุเหตุผล (ถ้ามี)">
-            </div>
-          </div>
-        </div>
+window.cartSetQty = function(idx, val) {
+  const qty = Math.max(1, parseInt(val) || 1);
+  state.cart[idx].Qty = qty;
+  renderCart();
+  calcTotals();
+};
 
-        <div class="card-panel">
-          <div class="card-panel-title">📡 สแกนบาร์โค้ดเพิ่มรายการ</div>
-          <div style="display:flex;gap:10px;margin-bottom:16px">
-            <input id="stockBarcode" class="form-control lg-input flex-1" placeholder="สแกนบาร์โค้ด...">
-            <button id="btnStockClear" class="btn btn-outline-danger">🗑 ล้างรายการ</button>
-          </div>
-          <div class="table-wrap">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>สินค้า</th>
-                  <th class="text-end">คงเหลือ</th>
-                  <th style="text-align:center;width:160px">รับเข้า (+)</th>
-                  <th style="text-align:center;width:180px">ตั้งคงเหลือใหม่</th>
-                  <th style="width:70px"></th>
-                </tr>
-              </thead>
-              <tbody id="stockBody">
-                <tr>
-                  <td colspan="5">
-                    <div class="empty-state">
-                      <div class="empty-icon">🗂️</div>
-                      <div class="empty-text">สแกนบาร์โค้ดเพื่อเพิ่มรายการ</div>
-                    </div>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:16px">
-            <button id="btnStockIn" class="btn btn-success btn-lg-action">📥 บันทึกรับเข้า</button>
-            <button id="btnStockAdjust" class="btn btn-warning btn-lg-action">⚖️ บันทึกปรับสต็อก</button>
-          </div>
-          <div class="text-muted-sm mt-12">📌 <strong>รับเข้า</strong> จะบวกจำนวนเข้าไปในคงเหลือ | 📌 <strong>ปรับสต็อก</strong> จะตั้งคงเหลือเป็นค่าที่กรอก</div>
+window.cartSetDisc = function(idx, val) {
+  const disc = Math.max(0, parseFloat(val) || 0);
+  state.cart[idx].Discount = disc;
+  calcTotals();
+};
+
+window.cartRemove = function(idx) {
+  state.cart.splice(idx, 1);
+  renderCart();
+  calcTotals();
+};
+
+function calcTotals() {
+  const subTotal = state.cart.reduce((sum, it) => sum + (it.Qty * it.Price), 0);
+  const totalDiscount = state.cart.reduce((sum, it) => sum + (it.Discount || 0), 0);
+  const grand = subTotal - totalDiscount;
+  
+  el('subTotal').textContent = fmt(subTotal);
+  el('discDisplay').textContent = `- ${fmt(totalDiscount)}`;
+  el('grandTotal').textContent = fmt(grand);
+}
+
+// ===== SAVE SALE =====
+function saveSale() {
+  const cashier = el('posCashier').value.trim();
+  if (!cashier) return toast('กรุณาเลือก Cashier');
+  if (!state.cart.length) return toast('ไม่มีสินค้าในตะกร้า');
+  
+  const payload = {
+    Cashier: cashier,
+    Customer: el('posCustomer').value.trim(),
+    Phone: el('posPhone').value.trim(),
+    Address: el('posAddress').value.trim(),
+    PaymentMethod: el('posPay').value,
+    Note: '',
+    items: state.cart.map(it => ({
+      ProductID: it.ProductID,
+      Barcode: it.Barcode,
+      Name: it.Name,
+      Qty: it.Qty,
+      Price: it.Price,
+      Discount: it.Discount || 0
+    }))
+  };
+  
+  setLoading(true, ['btnSaveSale', 'btnClearCart', 'btnPrintLast']);
+  google.script.run
+    .withSuccessHandler(res => {
+      setLoading(false, ['btnSaveSale', 'btnClearCart', 'btnPrintLast']);
+      if (!res.ok) return toast(res.message || 'บันทึกไม่สำเร็จ');
+      
+      state.lastReceipt = {
+        saleId: res.saleId,
+        dateTime: res.dateTime,
+        cashier,
+        items: payload.items,
+        totals: res.totals,
+        settings: state.settings,
+        customer: payload.Customer,
+        phone: payload.Phone,
+        address: payload.Address,
+        payment: payload.PaymentMethod
+      };
+      
+      state.cart = [];
+      renderCart();
+      el('posPhone').value = '';
+      el('posAddress').value = '';
+      calcTotals();
+      el('btnPrintLast').disabled = false;
+      
+      toast(`✅ บันทึกสำเร็จ | บิล ${res.saleId}`);
+      
+      google.script.run
+        .withSuccessHandler(r => {
+          if (r.ok) renderLowStock(r.items || []);
+        })
+        .api_getLowStock(20);
+    })
+    .withFailureHandler(err => {
+      setLoading(false, ['btnSaveSale', 'btnClearCart', 'btnPrintLast']);
+      toast(err.message || err);
+    })
+    .api_saveSale(payload);
+}
+
+// ===== PRINT RECEIPT =====
+function printPDFReceipt() {
+  if (!state.lastReceipt) return toast('ไม่มีบิลล่าสุด');
+  
+  const r = state.lastReceipt;
+  el('rStore').textContent = r.settings.store_name || 'AGRI SHOP';
+  el('rAddr').textContent = r.settings.store_address || '';
+  el('rPhone').textContent = r.settings.store_phone || '';
+  el('rSaleId').textContent = r.saleId;
+  el('rDate').textContent = new Date(r.dateTime).toLocaleString('th-TH');
+  el('rCashier').textContent = r.cashier;
+  
+  el('rItems').innerHTML = r.items.map(it => {
+    const line = it.Qty * it.Price - (it.Discount || 0);
+    return `
+      <div style="margin-bottom:4px">
+        <div>${esc(it.Name)}</div>
+        <div style="display:flex;justify-content:space-between;font-size:11px">
+          <span>${it.Qty} x ${fmt(it.Price)}</span>
+          <span>${fmt(line)}</span>
         </div>
       </div>
+    `;
+  }).join('');
+  
+  el('rSub').textContent = fmt(r.totals.subTotal);
+  el('rDisc').textContent = fmt(r.totals.discount);
+  el('rGrand').textContent = fmt(r.totals.grand);
+  el('rFooter').textContent = r.settings.receipt_footer || 'ขอบคุณที่อุดหนุน';
+  
+  window.print();
+}
 
-      <!-- REPORTS TAB -->
-      <div class="tab-page" id="tab-reports">
-        <div class="section-hdr">รายงาน</div>
-        <div class="section-sub">สรุปยอดขายรายวันและสินค้าขายดี</div>
-        
-        <div class="card-panel">
-          <div style="display:flex;gap:12px;align-items:flex-end">
-            <div style="flex:0 0 220px">
-              <label class="form-label">เลือกวันที่</label>
-              <input id="repDate" type="date" class="form-control">
-            </div>
-            <button id="btnRunDaily" class="btn btn-primary btn-lg-action" style="min-width:180px">📊 ดูรายงานรายวัน</button>
-          </div>
-        </div>
-
-        <!-- Stats -->
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:18px">
-          <div class="stat-card">
-            <div class="stat-icon" style="background:#eff6ff">📋</div>
-            <div>
-              <div class="stat-label">จำนวนบิล</div>
-              <div class="stat-value" id="repBills">0</div>
-            </div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-icon" style="background:#eff6ff">💰</div>
-            <div>
-              <div class="stat-label">ยอดขายรวม (บาท)</div>
-              <div class="stat-value" id="repTotal">0.00</div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Charts -->
-        <div style="display:grid;grid-template-columns:1fr 380px;gap:18px;margin-bottom:18px">
-          <div class="card-panel" style="margin-bottom:0">
-            <div class="card-panel-title">📊 ยอดขายสินค้า (Top 10)</div>
-            <div style="position:relative;height:280px">
-              <canvas id="chartBar"></canvas>
-            </div>
-          </div>
-          <div class="card-panel" style="margin-bottom:0">
-            <div class="card-panel-title">💳 ประเภทการชำระเงิน</div>
-            <div style="position:relative;height:220px;display:flex;align-items:center;justify-content:center">
-              <canvas id="chartDoughnut"></canvas>
-            </div>
-            <div id="payLegend" style="margin-top:12px;display:flex;flex-wrap:wrap;gap:8px;justify-content:center"></div>
-          </div>
-        </div>
-
-        <!-- Top Items Table -->
-        <div class="card-panel">
-          <div class="card-panel-title">🏆 สินค้าขายดี Top 15</div>
-          <div class="table-wrap">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th style="width:40px">#</th>
-                  <th>สินค้า</th>
-                  <th class="text-end">จำนวน</th>
-                  <th class="text-end">ยอดรวม</th>
-                </tr>
-              </thead>
-              <tbody id="topItemsBody">
-                <tr>
-                  <td colspan="4">
-                    <div class="empty-state">
-                      <div class="empty-icon">📊</div>
-                      <div class="empty-text">เลือกวันที่แล้วกด "ดูรายงาน"</div>
-                    </div>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
+// ===== LOW STOCK =====
+function renderLowStock(items) {
+  if (!items || !items.length) {
+    el('lowStockBody').innerHTML = `
+      <div class="empty-state" style="padding:24px">
+        <div class="empty-text">ไม่มีรายการใกล้หมด</div>
+      </div>
+    `;
+    return;
+  }
+  
+  el('lowStockBody').innerHTML = items.map(p => `
+    <div class="low-stock-item">
+      <div>
+        <div class="low-stock-name">${esc(p.Name)}</div>
+        <div class="low-stock-meta">${esc(p.Barcode)} · ${esc(p.Category || '')}</div>
+      </div>
+      <div style="text-align:right">
+        <div class="badge-stock badge-warn">เหลือ ${p.Stock}</div>
+        <div class="low-stock-meta">จุดสั่ง: ${p.ReorderPoint}</div>
       </div>
     </div>
-  </div>
-</div>
+  `).join('');
+}
 
-<!-- Loading Overlay -->
-<div class="loading-backdrop" id="loading">
-  <div class="loading-card">
-    <div class="spinner-blue"></div>
-    <div>
-      <div style="font-weight:700;font-size:14px;color:#0f172a">กำลังบันทึกข้อมูล...</div>
-      <div class="text-muted-sm">โปรดอย่าปิดหน้าต่าง</div>
+// ===== PRODUCTS TAB =====
+function loadProducts() {
+  const query = el('prodSearch').value.trim();
+  setLoading(true, ['btnProdSearch']);
+  
+  google.script.run
+    .withSuccessHandler(res => {
+      setLoading(false, ['btnProdSearch']);
+      if (!res.ok) return toast('โหลดไม่สำเร็จ');
+      
+      res.products.forEach(p => state.productsCache.set(p.Barcode, p));
+      renderProductsTable(res.products);
+    })
+    .withFailureHandler(err => {
+      setLoading(false, ['btnProdSearch']);
+      toast(err.message || err);
+    })
+    .api_listProducts(query);
+}
+
+function renderProductsTable(products) {
+  if (!products || !products.length) {
+    el('prodBody').innerHTML = `
+      <tr>
+        <td colspan="8">
+          <div class="empty-state">
+            <div class="empty-icon">📦</div>
+            <div class="empty-text">ไม่พบสินค้า</div>
+          </div>
+        </td>
+      </tr>
+    `;
+    return;
+  }
+  
+  el('prodBody').innerHTML = products.map(p => {
+    const statusBadge = p.Active
+      ? '<span class="badge-stock badge-ok">Active</span>'
+      : '<span class="badge-stock badge-low">Inactive</span>';
+    
+    return `
+      <tr>
+        <td class="mono" style="font-size:12px">${esc(p.ProductID)}</td>
+        <td class="mono">${esc(p.Barcode)}</td>
+        <td>
+          <div class="product-name">${esc(p.Name)}</div>
+          <div class="product-sub">${statusBadge}</div>
+        </td>
+        <td>${esc(p.Category || '')}</td>
+        <td class="text-end mono" style="font-weight:600">${fmt(p.Price)}</td>
+        <td class="text-end mono">${p.Stock}</td>
+        <td>
+          <button class="btn btn-sm-action btn-outline-primary" onclick='editProduct(${JSON.stringify(p)})'>✏️ แก้ไข</button>
+        </td>
+        <td>
+          <button class="btn btn-sm-action" style="color:#dc2626;background:transparent;border:1px solid #dc2626" 
+            onclick="deleteProduct('${esc(p.ProductID)}')">🗑 ลบ</button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+window.editProduct = function(p) {
+  el('pProductID').value = p.ProductID || '';
+  el('pBarcode').value = p.Barcode || '';
+  el('pName').value = p.Name || '';
+  el('pCategory').value = p.Category || '';
+  el('pUnit').value = p.Unit || '';
+  el('pCost').value = p.Cost || 0;
+  el('pPrice').value = p.Price || 0;
+  el('pStock').value = p.Stock || 0;
+  el('pReorder').value = p.ReorderPoint || 0;
+  el('pActive').value = p.Active ? 'TRUE' : 'FALSE';
+  
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+};
+
+window.deleteProduct = function(productId) {
+  if (!confirm('ยืนยันการลบสินค้านี้? การกระทำนี้ไม่สามารถย้อนกลับได้')) return;
+  
+  setLoading(true, ['btnProdSearch']);
+  google.script.run
+    .withSuccessHandler(res => {
+      setLoading(false, ['btnProdSearch']);
+      if (!res.ok) return toast('ลบไม่สำเร็จ');
+      toast('✅ ลบสำเร็จ');
+      loadProducts();
+    })
+    .withFailureHandler(err => {
+      setLoading(false, ['btnProdSearch']);
+      toast(err.message || err);
+    })
+    .api_deleteProduct(productId);
+};
+
+function saveProduct() {
+  const barcode = el('pBarcode').value.trim();
+  const name = el('pName').value.trim();
+  const price = parseFloat(el('pPrice').value) || 0;
+  
+  if (!barcode) return toast('กรุณากรอก Barcode');
+  if (!name) return toast('กรุณากรอกชื่อสินค้า');
+  if (price <= 0) return toast('กรุณากรอกราคาขาย');
+  
+  const payload = {
+    ProductID: el('pProductID').value.trim() || '',
+    Barcode: barcode,
+    Name: name,
+    Category: el('pCategory').value.trim(),
+    Unit: el('pUnit').value.trim(),
+    Cost: parseFloat(el('pCost').value) || 0,
+    Price: price,
+    Stock: parseFloat(el('pStock').value) || 0,
+    ReorderPoint: parseFloat(el('pReorder').value) || 0,
+    Active: el('pActive').value
+  };
+  
+  setLoading(true, ['btnSaveProduct']);
+  google.script.run
+    .withSuccessHandler(res => {
+      setLoading(false, ['btnSaveProduct']);
+      if (!res.ok) return toast('บันทึกไม่สำเร็จ');
+      
+      toast(`✅ บันทึกสำเร็จ (${res.mode === 'insert' ? 'เพิ่มใหม่' : 'แก้ไข'})`);
+      
+      // Clear form
+      el('pProductID').value = '';
+      el('pBarcode').value = '';
+      el('pName').value = '';
+      el('pCategory').value = '';
+      el('pUnit').value = '';
+      el('pCost').value = '';
+      el('pPrice').value = '';
+      el('pStock').value = '';
+      el('pReorder').value = '';
+      el('pActive').value = 'TRUE';
+      
+      loadProducts();
+    })
+    .withFailureHandler(err => {
+      setLoading(false, ['btnSaveProduct']);
+      toast(err.message || err);
+    })
+    .api_upsertProduct(payload);
+}
+
+// ===== STOCK TAB =====
+function addByBarcodeToStockTable(barcode) {
+  const found = state.stockItems.find(it => it.Barcode === barcode);
+  if (found) {
+    toast('สินค้านี้มีในรายการแล้ว');
+    return;
+  }
+  
+  if (state.productsCache.has(barcode)) {
+    const p = state.productsCache.get(barcode);
+    state.stockItems.push({
+      ProductID: p.ProductID,
+      Barcode: p.Barcode,
+      Name: p.Name,
+      Stock: p.Stock,
+      InQty: 0,
+      NewStock: p.Stock
+    });
+    renderStockTable();
+    return;
+  }
+  
+  setLoading(true, ['btnStockIn', 'btnStockAdjust']);
+  google.script.run
+    .withSuccessHandler(res => {
+      setLoading(false, ['btnStockIn', 'btnStockAdjust']);
+      if (!res.ok) return toast(res.message || 'ไม่พบสินค้า');
+      
+      const p = res.product;
+      state.productsCache.set(barcode, p);
+      state.stockItems.push({
+        ProductID: p.ProductID,
+        Barcode: p.Barcode,
+        Name: p.Name,
+        Stock: p.Stock,
+        InQty: 0,
+        NewStock: p.Stock
+      });
+      renderStockTable();
+    })
+    .withFailureHandler(err => {
+      setLoading(false, ['btnStockIn', 'btnStockAdjust']);
+      toast(err.message || err);
+    })
+    .api_getProductByBarcode(barcode);
+}
+
+function renderStockTable() {
+  if (!state.stockItems.length) {
+    el('stockBody').innerHTML = `
+      <tr>
+        <td colspan="5">
+          <div class="empty-state">
+            <div class="empty-icon">🗂️</div>
+            <div class="empty-text">สแกนบาร์โค้ดเพื่อเพิ่มรายการ</div>
+          </div>
+        </td>
+      </tr>
+    `;
+    return;
+  }
+  
+  el('stockBody').innerHTML = state.stockItems.map((it, idx) => `
+    <tr>
+      <td>
+        <div class="product-name">${esc(it.Name)}</div>
+        <div class="product-sub mono">${esc(it.Barcode)}</div>
+      </td>
+      <td class="text-end mono" style="font-weight:600">${it.Stock}</td>
+      <td style="text-align:center">
+        <input type="number" class="form-control" style="width:140px;margin:0 auto;text-align:center"
+          value="${it.InQty}" onchange="stockSetInQty(${idx}, this.value)" min="0">
+      </td>
+      <td style="text-align:center">
+        <input type="number" class="form-control" style="width:160px;margin:0 auto;text-align:center"
+          value="${it.NewStock}" onchange="stockSetNewStock(${idx}, this.value)" min="0">
+      </td>
+      <td style="text-align:center">
+        <button class="btn btn-sm-action" style="color:#dc2626;background:transparent;border:1px solid #dc2626"
+          onclick="stockRemove(${idx})">🗑</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+window.stockSetInQty = function(idx, val) {
+  const qty = Math.max(0, parseFloat(val) || 0);
+  state.stockItems[idx].InQty = qty;
+  state.stockItems[idx].NewStock = state.stockItems[idx].Stock + qty;
+  renderStockTable();
+};
+
+window.stockSetNewStock = function(idx, val) {
+  const stock = Math.max(0, parseFloat(val) || 0);
+  state.stockItems[idx].NewStock = stock;
+};
+
+window.stockRemove = function(idx) {
+  state.stockItems.splice(idx, 1);
+  renderStockTable();
+};
+
+function doStockIn() {
+  const by = el('stockBy').value.trim();
+  if (!by) return toast('กรุณาเลือกผู้บันทึก');
+  if (!state.stockItems.length) return toast('ไม่มีรายการรับเข้า');
+  
+  const items = state.stockItems.filter(it => it.InQty > 0);
+  if (!items.length) return toast('กรุณากรอกจำนวนรับเข้า');
+  
+  const payload = {
+    by,
+    note: el('stockNote').value.trim(),
+    items: items.map(it => ({
+      ProductID: it.ProductID,
+      Barcode: it.Barcode,
+      Name: it.Name,
+      Qty: it.InQty
+    }))
+  };
+  
+  setLoading(true, ['btnStockIn', 'btnStockAdjust']);
+  google.script.run
+    .withSuccessHandler(res => {
+      setLoading(false, ['btnStockIn', 'btnStockAdjust']);
+      if (!res.ok) return toast(res.message || 'บันทึกไม่สำเร็จ');
+      
+      toast(`✅ บันทึกรับเข้าสำเร็จ | Ref: ${res.ref}`);
+      state.stockItems = [];
+      el('stockNote').value = '';
+      renderStockTable();
+    })
+    .withFailureHandler(err => {
+      setLoading(false, ['btnStockIn', 'btnStockAdjust']);
+      toast(err.message || err);
+    })
+    .api_stockIn(payload);
+}
+
+function doStockAdjust() {
+  const by = el('stockBy').value.trim();
+  if (!by) return toast('กรุณาเลือกผู้บันทึก');
+  if (!state.stockItems.length) return toast('ไม่มีรายการปรับสต็อก');
+  
+  const payload = {
+    by,
+    note: el('stockNote').value.trim(),
+    items: state.stockItems.map(it => ({
+      ProductID: it.ProductID,
+      Barcode: it.Barcode,
+      Name: it.Name,
+      NewStock: it.NewStock
+    }))
+  };
+  
+  setLoading(true, ['btnStockIn', 'btnStockAdjust']);
+  google.script.run
+    .withSuccessHandler(res => {
+      setLoading(false, ['btnStockIn', 'btnStockAdjust']);
+      if (!res.ok) return toast(res.message || 'บันทึกไม่สำเร็จ');
+      
+      toast(`✅ บันทึกปรับสต็อกสำเร็จ | Ref: ${res.ref}`);
+      state.stockItems = [];
+      el('stockNote').value = '';
+      renderStockTable();
+    })
+    .withFailureHandler(err => {
+      setLoading(false, ['btnStockIn', 'btnStockAdjust']);
+      toast(err.message || err);
+    })
+    .api_stockAdjust(payload);
+}
+
+// ===== REPORTS TAB =====
+let barChart = null;
+let doughnutChart = null;
+
+function runDailyReport() {
+  const date = el('repDate').value;
+  if (!date) return toast('กรุณาเลือกวันที่');
+  
+  setLoading(true, ['btnRunDaily']);
+  google.script.run
+    .withSuccessHandler(res => {
+      setLoading(false, ['btnRunDaily']);
+      if (!res.ok) return toast('โหลดรายงานไม่สำเร็จ');
+      
+      el('repBills').textContent = res.summary.bills;
+      el('repTotal').textContent = fmt(res.summary.total);
+      
+      renderTopItemsTable(res.topItems || []);
+      renderBarChart(res.topItems || []);
+      renderDoughnutChart(res.paymentSummary || {});
+      
+      state.lastPaymentData = res.paymentSummary;
+    })
+    .withFailureHandler(err => {
+      setLoading(false, ['btnRunDaily']);
+      toast(err.message || err);
+    })
+    .api_reportDaily(date);
+}
+
+function renderTopItemsTable(items) {
+  if (!items || !items.length) {
+    el('topItemsBody').innerHTML = `
+      <tr>
+        <td colspan="4">
+          <div class="empty-state">
+            <div class="empty-icon">📊</div>
+            <div class="empty-text">ไม่มีข้อมูลสำหรับวันนี้</div>
+          </div>
+        </td>
+      </tr>
+    `;
+    return;
+  }
+  
+  el('topItemsBody').innerHTML = items.map((it, i) => `
+    <tr>
+      <td style="text-align:center;font-weight:700;color:#94a3b8">${i + 1}</td>
+      <td>${esc(it.Name)}</td>
+      <td class="text-end mono" style="font-weight:600">${fmt(it.Qty)}</td>
+      <td class="text-end mono" style="font-weight:700;color:#1e4d99">${fmt(it.Amount)}</td>
+    </tr>
+  `).join('');
+}
+
+function renderBarChart(items) {
+  const canvas = el('chartBar');
+  const ctx = canvas.getContext('2d');
+  
+  if (barChart) {
+    barChart.destroy();
+    barChart = null;
+  }
+  
+  if (!items || !items.length) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.font = '13px "IBM Plex Sans Thai"';
+    ctx.fillStyle = '#94a3b8';
+    ctx.textAlign = 'center';
+    ctx.fillText('ไม่มีข้อมูล', canvas.width / 2, canvas.height / 2);
+    return;
+  }
+  
+  const top10 = items.slice(0, 10);
+  
+  barChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: top10.map(it => it.Name.substring(0, 20)),
+      datasets: [
+        {
+          label: 'จำนวน',
+          data: top10.map(it => it.Qty),
+          backgroundColor: '#60a5fa',
+          borderColor: '#3b82f6',
+          borderWidth: 1,
+          yAxisID: 'y'
+        },
+        {
+          label: 'ยอดขาย (฿)',
+          data: top10.map(it => it.Amount),
+          backgroundColor: '#34d399',
+          borderColor: '#059669',
+          borderWidth: 1,
+          yAxisID: 'y1'
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: true, position: 'top' },
+        tooltip: { mode: 'index', intersect: false }
+      },
+      scales: {
+        y: { type: 'linear', position: 'left', title: { display: true, text: 'จำนวน' } },
+        y1: { type: 'linear', position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: 'ยอดขาย (฿)' } }
+      }
+    }
+  });
+}
+
+function renderDoughnutChart(paymentData) {
+  const canvas = el('chartDoughnut');
+  const ctx = canvas.getContext('2d');
+  
+  if (doughnutChart) {
+    doughnutChart.destroy();
+    doughnutChart = null;
+  }
+  
+  if (!paymentData || !Object.keys(paymentData).length) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.font = '13px "IBM Plex Sans Thai"';
+    ctx.fillStyle = '#94a3b8';
+    ctx.textAlign = 'center';
+    ctx.fillText('ไม่มีข้อมูล', canvas.width / 2, canvas.height / 2);
+    el('payLegend').innerHTML = '';
+    return;
+  }
+  
+  const labels = Object.keys(paymentData);
+  const data = Object.values(paymentData);
+  const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
+  
+  doughnutChart = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels,
+      datasets: [{
+        data,
+        backgroundColor: colors.slice(0, labels.length),
+        borderWidth: 2,
+        borderColor: '#fff'
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => `${ctx.label}: ${fmt(ctx.parsed)} ฿`
+          }
+        }
+      }
+    }
+  });
+  
+  // Custom legend
+  el('payLegend').innerHTML = labels.map((label, i) => `
+    <div style="display:flex;align-items:center;gap:6px;font-size:12px">
+      <div style="width:12px;height:12px;border-radius:2px;background:${colors[i]}"></div>
+      <span>${esc(label)}: <strong>${fmt(data[i])} ฿</strong></span>
     </div>
-  </div>
-</div>
+  `).join('');
+}
 
-<!-- Print Area -->
-<div id="printArea" style="display:none">
-  <div class="receipt p-2">
-    <div style="text-align:center;font-weight:700" id="rStore"></div>
-    <div style="text-align:center" id="rAddr"></div>
-    <div style="text-align:center" id="rPhone"></div>
-    <hr>
-    <div>บิล: <span id="rSaleId"></span></div>
-    <div>วันที่: <span id="rDate"></span></div>
-    <div>ผู้ขาย: <span id="rCashier"></span></div>
-    <hr>
-    <div id="rItems"></div>
-    <hr>
-    <div style="display:flex;justify-content:space-between"><div>รวม</div><div id="rSub"></div></div>
-    <div style="display:flex;justify-content:space-between"><div>ส่วนลด</div><div id="rDisc"></div></div>
-    <div style="display:flex;justify-content:space-between;font-weight:700"><div>สุทธิ</div><div id="rGrand"></div></div>
-    <hr>
-    <div style="text-align:center" id="rFooter"></div>
-  </div>
-</div>
-
-<!-- External Libraries -->
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-
-<!-- Custom JavaScript -->
-<script src="app.js"></script>
-
-</body>
-</html>
+// ===== APP START =====
+window.addEventListener('load', setupLogin);
